@@ -48,7 +48,7 @@ class HttpPostThread(Thread):
     def _log(self, msg):
         print(f'[Thread #{self.thread_id}] {msg}')
 
-    def _send_http_post(self, payload_length=10000):
+    def _send_http_post(self):
         global stop_now
 
         headers_list = [
@@ -65,6 +65,7 @@ class HttpPostThread(Thread):
         self.transport.send(b'\r\n\r\n')
         self._log(f'Sent headers:\n{headers}\n')
 
+        payload_length = random.randint(5000, 10000)
         for i in range(0, payload_length - 1):
             if stop_now:
                 self.running = False
